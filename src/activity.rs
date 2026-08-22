@@ -198,30 +198,15 @@ impl Activity {
                 23 | 0..=5 => 1.0,
                 22 => 0.8,
                 6 => 0.4,
-                7 => {
-                    if weekend {
-                        0.7
-                    } else {
-                        0.03
-                    }
-                }
-                8 => {
-                    if weekend {
-                        0.35
-                    } else {
-                        0.02
-                    }
-                }
+                7 if weekend => 0.7,
+                7 => 0.03,
+                8 if weekend => 0.35,
+                8 => 0.02,
                 _ => 0.02,
             },
             Activity::Nap => match h {
-                13..=15 => {
-                    if weekend {
-                        0.7
-                    } else {
-                        0.3
-                    }
-                }
+                13..=15 if weekend => 0.7,
+                13..=15 => 0.3,
                 _ => 0.05,
             },
             Activity::Meal => match h {
@@ -253,13 +238,8 @@ impl Activity {
             },
             Activity::Exercise => match h {
                 6..=8 | 17..=20 => 1.0,
-                9..=16 => {
-                    if weekend {
-                        0.8
-                    } else {
-                        0.2
-                    }
-                }
+                9..=16 if weekend => 0.8,
+                9..=16 => 0.2,
                 _ => 0.05,
             },
             Activity::Chores => match h {
@@ -269,13 +249,8 @@ impl Activity {
             },
             Activity::Hobby => match h {
                 19..=22 => 1.0,
-                9..=18 => {
-                    if weekend {
-                        0.9
-                    } else {
-                        0.3
-                    }
-                }
+                9..=18 if weekend => 0.9,
+                9..=18 => 0.3,
                 23 => 0.3,
                 _ => 0.05,
             },
