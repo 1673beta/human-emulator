@@ -1,0 +1,98 @@
+name: build & deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Cloudflare Pages のプロジェクト名。作成済みのものに合わせる。
+  PAGES_PROJECT: human-emulator
+
+jobs:
+  check:
+    name: 検査
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 書式
+        run: cargo fmt --all -- --check
+
+      - name: clippy (ネイティブ)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: clippy (wasm)
+        run: cargo clippy --target wasm32-unknown-unknown --bin web -- -D warnings
+
+      - name: テスト
+        run: cargo test
+
+  build:
+    name: ビルド
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: trunk を入れる
+        run: cargo binstall -y --locked trunk
+
+      - name: wasm を焼く
+        run: trunk build --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    name: Cloudflare Pages へ配る
+    needs: build
+    runs-on: ubuntu-latest
+    # フォークからの PR には secrets が渡らないので、その場合は配らない。
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: wrangler で配置
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # main は本番、それ以外はプレビュー用の URL が発行される。
+          command: >-
+            pages deploy dist
+            --project-name=${{ env.PAGES_PROJECT }}
+            --branch=${{ github.head_ref || github.ref_name }}

@@ -1,0 +1,17 @@
+# Cloudflare Pages に読ませるヘッダ設定。ファイル名にハッシュが入る資産は
+# 恒久キャッシュ、index.html だけは毎回検証させる。
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/*.wasm
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate

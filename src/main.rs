@@ -4,16 +4,7 @@
 //! 社会的スケジュールがそれを律する。出てくる一週間がどれだけ
 //! 「ふつう」だったかを健常度として採点する。
 
-mod activity;
-mod clock;
-mod dialogue;
-mod human;
-mod needs;
-mod rng;
-
-use activity::Activity;
-use human::Human;
-use needs::Drive;
+use human_emulator::{Drive, Human};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Options {
@@ -110,25 +101,9 @@ fn main() {
     print_summary(&human);
 }
 
-/// 境界で切れただけの同じ行動は、一つの塊として見せる。
-fn merged(human: &Human) -> Vec<human::Entry> {
-    let mut out: Vec<human::Entry> = Vec::new();
-    for e in &human.log {
-        match out.last_mut() {
-            Some(prev) if prev.activity == e.activity && prev.at.day() == e.at.day() => {
-                prev.minutes += e.minutes;
-                prev.mood = e.mood;
-                prev.remark = e.remark;
-            }
-            _ => out.push(e.clone()),
-        }
-    }
-    out
-}
-
 fn print_timeline(human: &Human) {
     let mut current_day = u32::MAX;
-    for e in &merged(human) {
+    for e in &human.merged_log() {
         if e.at.day() != current_day {
             current_day = e.at.day();
             println!("── {}日目({}) ──", current_day + 1, e.at.weekday().label());
@@ -167,7 +142,7 @@ fn print_days(human: &Human) {
 }
 
 fn print_summary(human: &Human) {
-    let total: u32 = human.log.iter().map(|e| e.minutes).sum();
+    let total = human.total_minutes();
     println!("── 総括 ──");
     println!("終了時刻 : {}", human.clock.stamp());
     println!("平均気分 : {:.1} / 100", human.average_mood());
@@ -179,23 +154,7 @@ fn print_summary(human: &Human) {
     println!();
 
     println!("時間の使い方:");
-    let mut rows: Vec<(Activity, u32)> = Activity::VOLUNTARY
-        .iter()
-        .copied()
-        .chain([Activity::Work, Activity::Commute])
-        .map(|a| {
-            let m = human
-                .log
-                .iter()
-                .filter(|e| e.activity == a)
-                .map(|e| e.minutes)
-                .sum();
-            (a, m)
-        })
-        .filter(|(_, m)| *m > 0)
-        .collect();
-    rows.sort_by_key(|(_, m)| std::cmp::Reverse(*m));
-    for (a, m) in rows {
+    for (a, m) in human.time_by_activity() {
         let share = m as f32 / total.max(1) as f32;
         let bar = "█".repeat(((share * 40.0).round() as usize).max(1));
         println!(

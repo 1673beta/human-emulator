@@ -3,4 +3,30 @@ name = "human-emulator"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "human_emulator"
+path = "src/lib.rs"
+
+# ネイティブの CLI。既定のバイナリ。
+[[bin]]
+name = "human-emulator"
+path = "src/main.rs"
+
+# Yew のフロントエンド。trunk がこれを wasm32 向けにビルドする。
+[[bin]]
+name = "web"
+path = "src/bin/web.rs"
+
 [dependencies]
+
+# ブラウザ向けの依存はここだけ。ネイティブのビルド・テストには一切入らない。
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+yew = { version = "0.23", features = ["csr"] }
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlInputElement"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

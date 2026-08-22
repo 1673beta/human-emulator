@@ -330,6 +330,45 @@ impl Human {
         self.spent_today = [0; Activity::ALL.len()];
     }
 
+    /// 境界で切れただけの同じ行動をひと塊にまとめた記録。表示用。
+    pub fn merged_log(&self) -> Vec<Entry> {
+        let mut out: Vec<Entry> = Vec::new();
+        for e in &self.log {
+            match out.last_mut() {
+                Some(prev) if prev.activity == e.activity && prev.at.day() == e.at.day() => {
+                    prev.minutes += e.minutes;
+                    prev.mood = e.mood;
+                    prev.remark = e.remark;
+                }
+                _ => out.push(e.clone()),
+            }
+        }
+        out
+    }
+
+    /// 行動ごとの合計時間(分)。多い順。0 分の行動は含まない。
+    pub fn time_by_activity(&self) -> Vec<(Activity, u32)> {
+        let mut rows: Vec<(Activity, u32)> = Activity::ALL
+            .iter()
+            .map(|&a| {
+                let m = self
+                    .log
+                    .iter()
+                    .filter(|e| e.activity == a)
+                    .map(|e| e.minutes)
+                    .sum();
+                (a, m)
+            })
+            .filter(|(_, m)| *m > 0)
+            .collect();
+        rows.sort_by_key(|(_, m)| std::cmp::Reverse(*m));
+        rows
+    }
+
+    pub fn total_minutes(&self) -> u32 {
+        self.log.iter().map(|e| e.minutes).sum()
+    }
+
     pub fn average_mood(&self) -> f32 {
         if self.mood_minutes == 0 {
             return 0.0;

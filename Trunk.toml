@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+dist = "dist"
+# Cloudflare Pages のルートに置く前提。サブパスに置くなら "/配下/" にする。
+public_url = "/"
+
+[serve]
+port = 8080
+open = false
