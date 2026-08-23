@@ -5,7 +5,7 @@
 
 #[cfg(target_arch = "wasm32")]
 mod app {
-    use human_emulator::{Activity, Drive, Human};
+    use human_emulator::{Activity, Course, Drive, Human};
     use web_sys::HtmlInputElement;
     use yew::prelude::*;
 
@@ -88,6 +88,7 @@ mod app {
 
                 { summary(&human) }
                 { day_reports(&human, &selected, selected_day) }
+                { menu_of_day(&human, selected_day) }
                 { timeline(&human, selected_day) }
                 { time_use(&human) }
                 { final_needs(&human) }
@@ -130,6 +131,15 @@ mod app {
                     <span class="card-note">{ "時間" }</span>
                 </div>
                 <div class="card">
+                    <span class="card-label">{ "平均栄養" }</span>
+                    <span class="card-value">
+                        { if h.days.is_empty() { "0".to_string() } else {
+                            format!("{:.0}", h.days.iter().map(|d| d.nutrition).sum::<f32>() / h.days.len() as f32)
+                        } }
+                    </span>
+                    <span class="card-note">{ "/ 100" }</span>
+                </div>
+                <div class="card">
                     <span class="card-label">{ "対人接触" }</span>
                     <span class="card-value">
                         { h.days.iter().map(|d| d.social_minutes).sum::<u32>() }
@@ -148,7 +158,7 @@ mod app {
                     <thead>
                         <tr>
                             <th>{ "日" }</th><th>{ "睡眠" }</th><th>{ "勤務" }</th>
-                            <th>{ "対人" }</th><th>{ "食事" }</th><th>{ "健常度" }</th>
+                            <th>{ "対人" }</th><th>{ "食事" }</th><th>{ "栄養" }</th><th>{ "健常度" }</th>
                             <th class="reasons">{ "所見" }</th>
                         </tr>
                     </thead>
@@ -164,6 +174,7 @@ mod app {
                                 <td>{ format!("{}分", d.work_minutes) }</td>
                                 <td>{ format!("{}分", d.social_minutes) }</td>
                                 <td>{ format!("{}回", d.meals) }</td>
+                                <td>{ format!("{:.0}", d.nutrition) }</td>
                                 <td class={classes!("score", verdict_class(d.score))}>
                                     { format!("{:.0}", d.score) }
                                 </td>
@@ -211,10 +222,48 @@ mod app {
                         <span class="mood-bar">
                             <span class="mood-fill" style={format!("width:{:.0}%", e.mood)} />
                         </span>
-                        <span class="remark">{ e.remark }</span>
+                        <span class="remark">{ match e.meal {
+                            Some((course, dish)) => format!("{}「{}」", course.label(), dish.name),
+                            None => e.remark.to_string(),
+                        } }</span>
                     </li>
                 }) }
                 </ol>
+            </section>
+        }
+    }
+
+    /// その日の献立。何を食べたかは健常度に直に効く。
+    fn menu_of_day(h: &Human, day: u32) -> Html {
+        let Some(report) = h.days.iter().find(|d| d.day == day) else {
+            return Html::default();
+        };
+        html! {
+            <section class="panel">
+                <h2>{ format!("献立 — 栄養 {:.0} / 100", report.nutrition) }</h2>
+                <ul class="menu">
+                { for Course::ALL.iter().map(|&c| {
+                    let dish = report.menu[c.index()];
+                    html! {
+                        <li>
+                            <span class="course">{ c.label() }</span>
+                            <span class="dish">
+                                { dish.map(|d| d.name).unwrap_or("抜き") }
+                                { if dish.is_some_and(|d| d.vegetables) {
+                                    html! { <span class="veg" title="野菜あり">{ "菜" }</span> }
+                                } else {
+                                    Html::default()
+                                } }
+                            </span>
+                            <span class="bar-track">
+                                <span class="bar-fill nutrition"
+                                      style={format!("width:{:.0}%", dish.map_or(0.0, |d| d.nutrition))} />
+                            </span>
+                            <span class="bar-value">{ format!("{:.0}", dish.map_or(0.0, |d| d.nutrition)) }</span>
+                        </li>
+                    }
+                }) }
+                </ul>
             </section>
         }
     }

@@ -4,7 +4,7 @@
 //! 社会的スケジュールがそれを律する。出てくる一週間がどれだけ
 //! 「ふつう」だったかを健常度として採点する。
 
-use human_emulator::{Drive, Human};
+use human_emulator::{Course, Drive, Human};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Options {
@@ -108,13 +108,18 @@ fn print_timeline(human: &Human) {
             current_day = e.at.day();
             println!("── {}日目({}) ──", current_day + 1, e.at.weekday().label());
         }
+        // 食事のときは台詞より献立を見せる。
+        let note = match e.meal {
+            Some((course, dish)) => format!("{}「{}」", course.label(), dish.name),
+            None => e.remark.to_string(),
+        };
         println!(
             "  {}  {:<10} {:>3}分  気分{:>3.0}  {}",
             e.at.hhmm(),
             e.activity.label(),
             e.minutes,
             e.mood,
-            e.remark
+            note
         );
     }
     println!();
@@ -124,16 +129,25 @@ fn print_days(human: &Human) {
     println!("── 日報 ──");
     for d in &human.days {
         println!(
-            "{}日目({})  睡眠{:>4}分  勤務{:>4}分  対人{:>3}分  食事{}回   健常度 {:>5.1} [{}]",
+            "{}日目({})  睡眠{:>4}分  勤務{:>4}分  対人{:>3}分  食事{}回(栄養{:>3.0})  健常度 {:>5.1} [{}]",
             d.day + 1,
             d.weekday.label(),
             d.sleep_minutes,
             d.work_minutes,
             d.social_minutes,
             d.meals,
+            d.nutrition,
             d.score,
             d.verdict()
         );
+        let menu: Vec<String> = Course::ALL
+            .iter()
+            .map(|c| match d.menu[c.index()] {
+                Some(dish) => format!("{} {}", c.label(), dish.name),
+                None => format!("{} 抜き", c.label()),
+            })
+            .collect();
+        println!("            献立: {}", menu.join(" / "));
         for (reason, cost) in &d.penalties {
             println!("            - {reason} (-{cost:.0})");
         }
@@ -146,6 +160,12 @@ fn print_summary(human: &Human) {
     println!("── 総括 ──");
     println!("終了時刻 : {}", human.clock.stamp());
     println!("平均気分 : {:.1} / 100", human.average_mood());
+    let nutrition = if human.days.is_empty() {
+        0.0
+    } else {
+        human.days.iter().map(|d| d.nutrition).sum::<f32>() / human.days.len() as f32
+    };
+    println!("平均栄養 : {nutrition:.1} / 100");
     println!(
         "健常度   : {:.1} / 100  [{}]",
         human.normalcy(),

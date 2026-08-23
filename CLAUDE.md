@@ -34,9 +34,15 @@ CI runs exactly those checks — see [.github/workflows/deploy.yml](.github/work
   - [activity.rs](src/activity.rs) — 13 activities × `effect()` (per-minute drive deltas),
     `appropriateness()` (0–1 by hour — **this is where "健常" lives**), `appeal()` (need pressure,
     with a 30-point deadband and a relief cap), `satiation_minutes()` (daily boredom).
+  - [meal.rs](src/meal.rs) — three `Course` windows (breakfast 6–9, lunch 11–14, dinner 17–21) and
+    the menus. Each course is usable once a day, which is what pins meals at 3/day; `Activity::Meal`
+    delegates its `appropriateness` here. Dish choice is driven by `effort(stress, sleepiness)`, so
+    a tired human eats worse. `nutrition` feeds the daily score, `satiety` sets a floor on how far
+    that meal can drop hunger.
   - [human.rs](src/human.rs) — the loop. `obligation()` imposes the weekday commute/work/lunch
     schedule, free time is scored, activities run in blocks truncated at the next boundary, and
-    `close_day()` applies the penalties that make up 健常度.
+    `close_day()` applies the penalties that make up 健常度. `open_course()` gates meals; the
+    weekday lunch obligation falls through to free choice if lunch was already eaten.
   - [dialogue.rs](src/dialogue.rs) — canned remarks per activity/mood.
 - [src/main.rs](src/main.rs) — CLI binary `human-emulator` (default bin). Owns arg parsing and the
   only use of `SystemTime`.
@@ -57,8 +63,13 @@ Browser dependencies (`yew`, `js-sys`, `web-sys`) live under
   write `fn stamp_は…`.
 - In `html!`, the `for` shorthand only works inside an element, so nested lists need a `<>…</>`.
 - Yew 0.23: the macro is `#[component(Name)]` (`function_component` still exists as an alias).
+- The nutrition thresholds in `close_day` (35 / 50) are calibrated against the observed
+  distribution of daily nutrition (median ≈ 60, p25 ≈ 52). If you change the menus or `effort`,
+  re-measure before moving them, or the penalty either never fires or fires every day.
 - Tuning the model means changing numbers in `effect` / `appropriateness` / `satiation_minutes`.
   The guard rails are the behaviour tests in `human.rs`: sleeps every night, works every weekday,
-  健常度 ≥ 70 across several seeds, no drive pinned at 100, never gets up at 3am, gapless log.
+  健常度 ≥ 70 across several seeds, no drive pinned at 100, never gets up at 3am, gapless log,
+  exactly three meals a day and only inside their windows.
   Past regressions those tests caught: bathing four times in a row, snacking every five minutes,
-  waking at 05:00 because a sleep block happened to end there.
+  waking at 05:00 because a sleep block happened to end there, and eating four times a day because
+  hunger outran three meals.

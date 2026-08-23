@@ -38,8 +38,8 @@ impl Drive {
         match self {
             // 16 時間で眠気がほぼ限界に達する
             Drive::Sleepiness => 100.0 / (16.0 * 60.0),
-            // 5 時間で空腹が限界に達する
-            Drive::Hunger => 100.0 / (5.0 * 60.0),
+            // 7 時間で空腹が限界に達する。三食の間隔がおよそこれ。
+            Drive::Hunger => 100.0 / (7.0 * 60.0),
             Drive::Loneliness => 100.0 / (30.0 * 60.0),
             Drive::Grime => 100.0 / (20.0 * 60.0),
             // ストレスは放置しても緩やかに溜まる
@@ -160,6 +160,14 @@ mod tests {
         let before = n.hunger;
         n.drift(120, 1.0);
         assert!(n.hunger > before);
+    }
+
+    #[test]
+    fn 七時間で空腹が限界に達する() {
+        let mut n = Needs::rested();
+        n.set(Drive::Hunger, 0.0);
+        n.drift(7 * 60, 1.0);
+        assert!(n.hunger > 95.0, "空腹 {}", n.hunger);
     }
 
     #[test]

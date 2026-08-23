@@ -4,6 +4,7 @@
 use crate::activity::Activity;
 use crate::clock::{Clock, MINUTES_PER_DAY, Weekday};
 use crate::dialogue;
+use crate::meal::{self, Course, Dish};
 use crate::needs::{Drive, Needs};
 use crate::rng::Rng;
 
@@ -77,6 +78,8 @@ pub struct Entry {
     pub minutes: u32,
     pub mood: f32,
     pub remark: &'static str,
+    /// 食事のときだけ、その回の枠と献立。
+    pub meal: Option<(Course, Dish)>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -85,7 +88,8 @@ struct DayStats {
     work: u32,
     social: u32,
     bathe: u32,
-    meals: u32,
+    /// 朝・昼・夕の枠ごとに、何を食べたか。
+    courses: [Option<Dish>; 3],
     low_mood: u32,
     late_night: bool,
 }
@@ -98,6 +102,10 @@ pub struct DayReport {
     pub work_minutes: u32,
     pub social_minutes: u32,
     pub meals: u32,
+    /// その日の献立(朝・昼・夕)。抜いた枠は `None`。
+    pub menu: [Option<Dish>; 3],
+    /// 食べたものの栄養の平均。食事がなければ 0。
+    pub nutrition: f32,
     pub penalties: Vec<(&'static str, f32)>,
     pub score: f32,
 }
@@ -121,6 +129,8 @@ pub struct Human {
     pub days: Vec<DayReport>,
     rng: Rng,
     last: Option<Activity>,
+    /// いま食べている献立。満腹度で空腹の下限が決まる。
+    eating: Option<Dish>,
     /// その日ここまでに各行動へ費やした分数(飽きの計算用)。
     spent_today: [u32; Activity::ALL.len()],
     today: DayStats,
@@ -143,6 +153,7 @@ impl Human {
             days: Vec::new(),
             rng: Rng::new(seed),
             last: None,
+            eating: None,
             spent_today: [0; Activity::ALL.len()],
             today: DayStats {
                 sleep: 7 * 60, // 前夜ぶんを計上しておく
@@ -185,6 +196,9 @@ impl Human {
         }
 
         self.note_session(activity);
+        let meal = self
+            .eating
+            .and_then(|d| Course::from_hour(at.hour()).map(|c| (c, d)));
         self.apply(activity, minutes);
         self.last = Some(activity);
 
@@ -196,20 +210,39 @@ impl Human {
             minutes,
             mood,
             remark,
+            meal,
         });
+    }
+
+    /// いまの時刻の食事の枠。まだ食べていない枠だけ返す。
+    fn open_course(&self) -> Option<Course> {
+        let c = Course::from_hour(self.clock.hour())?;
+        self.today.courses[c.index()].is_none().then_some(c)
     }
 
     fn choose(&mut self) -> Activity {
         if let Some(a) = obligation(self.clock) {
-            return a;
+            // 昼休みでも、もう昼を食べていれば別のことをする。
+            if a != Activity::Meal || self.open_course().is_some() {
+                return a;
+            }
         }
+        let meal_open = self.open_course().is_some();
         let mut best = (Activity::Idle, f32::MIN);
         for a in Activity::VOLUNTARY {
+            if a == Activity::Meal && !meal_open {
+                continue;
+            }
             // 欲求の切迫さに、その時間帯としての「ふつうさ」を掛ける。
             let mut score = a.appeal(&self.needs);
             if a.is_leisure() {
                 // 用事がなくても空き時間は埋まる。
                 score += 1.2;
+            }
+            if a == Activity::Meal {
+                // 腹が減っていなくても、食事の時刻には食べる。それが健常。
+                // ただし本当に空いていないときだけは抜くこともある。
+                score += 1.5 * (self.needs.hunger / 25.0).min(1.0);
             }
             // 同じことを一日に何度もやるほど飽きる。
             score *= 1.0 / (1.0 + self.spent_today[a.index()] as f32 / a.satiation_minutes());
@@ -234,8 +267,16 @@ impl Human {
 
     /// 回数で数える指標は行動の開始時に一度だけ計上する。
     fn note_session(&mut self, a: Activity) {
+        self.eating = None;
         match a {
-            Activity::Meal => self.today.meals += 1,
+            Activity::Meal => {
+                if let Some(course) = self.open_course() {
+                    let effort = meal::effort(self.needs.stress, self.needs.sleepiness);
+                    let dish = meal::choose(course, effort, &mut self.rng);
+                    self.today.courses[course.index()] = Some(dish);
+                    self.eating = Some(dish);
+                }
+            }
             Activity::Sleep => {
                 let start = self.clock.minute_of_day();
                 if (0..5 * 60).contains(&start) {
@@ -251,6 +292,13 @@ impl Human {
             self.needs.drift(1, circadian(self.clock.hour()));
             for d in Drive::ALL {
                 self.needs.adjust(d, a.effect(d));
+            }
+            // 軽い食事は空腹を残す。コーヒー一杯で腹は膨れない。
+            if let Some(dish) = self.eating {
+                let floor = dish.hunger_floor();
+                if self.needs.hunger < floor {
+                    self.needs.hunger = floor;
+                }
             }
 
             let mood = self.needs.mood();
@@ -294,10 +342,26 @@ impl Human {
         } else if s.sleep < 7 * 60 {
             penalties.push(("やや寝不足", 5.0));
         }
-        if s.meals < 2 {
-            penalties.push(("欠食", 8.0));
-        } else if s.meals == 2 {
-            penalties.push(("食事が二回だけ", 3.0));
+        let eaten: Vec<Dish> = s.courses.iter().flatten().copied().collect();
+        let missing = 3 - eaten.len() as u32;
+        if missing > 0 {
+            penalties.push(("欠食", missing as f32 * 5.0));
+        }
+        let nutrition = if eaten.is_empty() {
+            0.0
+        } else {
+            eaten.iter().map(|d| d.nutrition).sum::<f32>() / eaten.len() as f32
+        };
+        if !eaten.is_empty() {
+            // しきい値は実際に出てくる栄養の分布(中央値およそ 60)に合わせてある。
+            if nutrition < 35.0 {
+                penalties.push(("食事の中身が貧しい", 8.0));
+            } else if nutrition < 50.0 {
+                penalties.push(("食事が偏っている", 4.0));
+            }
+            if !eaten.iter().any(|d| d.vegetables) {
+                penalties.push(("野菜を食べていない", 4.0));
+            }
         }
         if s.social == 0 {
             penalties.push(("誰とも関わっていない", 6.0));
@@ -322,7 +386,9 @@ impl Human {
             sleep_minutes: s.sleep,
             work_minutes: s.work,
             social_minutes: s.social,
-            meals: s.meals,
+            meals: eaten.len() as u32,
+            menu: s.courses,
+            nutrition,
             penalties,
             score,
         });
@@ -339,6 +405,7 @@ impl Human {
                     prev.minutes += e.minutes;
                     prev.mood = e.mood;
                     prev.remark = e.remark;
+                    prev.meal = prev.meal.or(e.meal);
                 }
                 _ => out.push(e.clone()),
             }
@@ -513,6 +580,83 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn 一日三食を決まった時刻にとる() {
+        for seed in [1u64, 42, 777, 65535] {
+            let mut h = Human::new("被験者", seed);
+            h.run(14);
+            for d in &h.days {
+                assert_eq!(
+                    d.meals,
+                    3,
+                    "seed {seed} の{}日目が {}食",
+                    d.day + 1,
+                    d.meals
+                );
+                assert!(d.menu.iter().all(|m| m.is_some()), "枠に穴がある");
+            }
+            for e in h.log.iter().filter(|e| e.activity == Activity::Meal) {
+                let (course, _) = e.meal.expect("食事には献立が付く");
+                assert_eq!(
+                    Course::from_hour(e.at.hour()),
+                    Some(course),
+                    "{} に枠外の食事",
+                    e.at.stamp()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn 献立の中身が採点に効く() {
+        let mut h = Human::new("被験者", 2024);
+        h.run(30);
+        let has = |d: &DayReport, name: &str| d.penalties.iter().any(|(r, _)| *r == name);
+        let mut 貧しい日 = 0;
+        for d in &h.days {
+            if d.nutrition < 35.0 {
+                assert!(
+                    has(d, "食事の中身が貧しい"),
+                    "{}日目が見逃されている",
+                    d.day + 1
+                );
+                貧しい日 += 1;
+            } else if d.nutrition < 50.0 {
+                assert!(
+                    has(d, "食事が偏っている"),
+                    "{}日目が見逃されている",
+                    d.day + 1
+                );
+            } else {
+                assert!(!has(d, "食事が偏っている") && !has(d, "食事の中身が貧しい"));
+            }
+            let 野菜 = d.menu.iter().flatten().any(|m| m.vegetables);
+            assert_eq!(has(d, "野菜を食べていない"), !野菜);
+        }
+        assert!(貧しい日 < h.days.len() / 3, "貧しい日が多すぎる");
+    }
+
+    #[test]
+    fn 疲れた日ほど食事が雑になる() {
+        // 一月ぶん回して、気分の悪い日と良い日で栄養を比べる。
+        let mut h = Human::new("被験者", 31337);
+        h.run(30);
+        let mut 低い = (0.0, 0);
+        let mut 高い = (0.0, 0);
+        for d in &h.days {
+            let bucket = if d.weekday.is_weekend() {
+                &mut 高い
+            } else {
+                &mut 低い
+            };
+            bucket.0 += d.nutrition;
+            bucket.1 += 1;
+        }
+        let 平日 = 低い.0 / 低い.1 as f32;
+        let 週末 = 高い.0 / 高い.1 as f32;
+        assert!(週末 > 平日, "週末 {週末} / 平日 {平日}");
     }
 
     #[test]

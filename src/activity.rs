@@ -77,7 +77,8 @@ impl Activity {
         match self {
             Activity::Sleep => 480.0,
             Activity::Nap => 30.0,
-            Activity::Meal => 90.0,
+            // 食事は「飽き」ではなく朝昼夕の枠で制限する。
+            Activity::Meal => f32::INFINITY,
             Activity::Snack => 25.0,
             Activity::Bathe => 25.0,
             Activity::Chat => 45.0,
@@ -134,12 +135,12 @@ impl Activity {
         match (self, d) {
             // 睡眠中は代謝が落ちるので、放置分の欲求上昇を打ち消す向きに効く。
             (Sleep, Sleepiness) => -0.55,
-            (Sleep, Hunger) => -0.23,
+            (Sleep, Hunger) => -0.19,
             (Sleep, Stress) => -0.06,
             (Sleep, Loneliness) => -0.04,
 
             (Nap, Sleepiness) => -0.60,
-            (Nap, Hunger) => -0.20,
+            (Nap, Hunger) => -0.15,
 
             (Meal, Hunger) => -3.0,
             (Meal, Stress) => -0.10,
@@ -155,10 +156,10 @@ impl Activity {
             (Commute, Stress) => 0.05,
             (Commute, Sleepiness) => 0.03,
             (Commute, Grime) => 0.04,
-            (Commute, Hunger) => 0.10,
+            (Commute, Hunger) => 0.06,
 
             (Work, Stress) => 0.07,
-            (Work, Hunger) => 0.15,
+            (Work, Hunger) => 0.06,
             (Work, Grime) => 0.05,
             (Work, Loneliness) => -0.04,
 
@@ -209,11 +210,8 @@ impl Activity {
                 13..=15 => 0.3,
                 _ => 0.05,
             },
-            Activity::Meal => match h {
-                7..=8 | 12..=13 | 18..=20 => 1.0,
-                9..=11 | 14..=17 | 21 => 0.25,
-                _ => 0.03,
-            },
+            // 朝昼夕の枠の中だけ。枠は一日に一度しか使えない(human 側で管理)。
+            Activity::Meal => crate::meal::Course::appropriateness(h),
             Activity::Snack => match h {
                 10..=11 | 15..=16 | 21..=22 => 0.8,
                 7..=9 | 12..=14 | 17..=20 => 0.3,

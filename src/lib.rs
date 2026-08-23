@@ -8,11 +8,13 @@ pub mod activity;
 pub mod clock;
 pub mod dialogue;
 pub mod human;
+pub mod meal;
 pub mod needs;
 pub mod rng;
 
 pub use activity::Activity;
 pub use clock::{Clock, Weekday};
 pub use human::{DayReport, Entry, Human};
+pub use meal::{Course, Dish};
 pub use needs::{Drive, Needs};
 pub use rng::Rng;
